@@ -50,3 +50,8 @@ Option `--receipt-out chemin.json` : export local facultatif du résultat, **y c
 - Le précontrôle et la copie ne constituent pas une transaction unique au niveau du système de fichiers : après crash du processus, des fichiers orphelins non publics peuvent exister, à examiner avant nettoyage. Un échec Python intercepté annule la transaction DB et nettoie les nouveaux fichiers copiés.
 - Aucun réseau, aucun changement GitHub, aucune opération de publication et aucune identité Kristal.
 - Le format de reçu Médiathèque `koa.encyk-source-handoff-receipt/1.0.0` est une **extension proposée côté consommateur**, non une version de contrat déjà acceptée par EncyK. Il reste à faire accepter le reçu par le producteur et à tester le cycle réel de confirmation.
+
+## 2026-10-27 — EncyK 0.14.0
+
+This document originally described the EncyK 0.12.0 baseline. Current producer
+compatibility and instance selection are documented in `27_skope_encyk014_instance_import.md`.

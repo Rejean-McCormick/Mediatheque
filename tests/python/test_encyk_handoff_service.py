@@ -11,7 +11,8 @@ from conftest import import_app_callable
 
 
 def make_handoff(tmp_path: Path, *, scope: str = 'pilot-a', snapshot: str = 'snapshot-1',
-                 url: str = 'https://www.wikidata.org/wiki/Special:EntityData'):
+                 url: str = 'https://www.wikidata.org/wiki/Special:EntityData',
+                 producer_version: str = '0.12.0'):
     root = tmp_path / ('evidence-' + scope)
     root.mkdir(parents=True,exist_ok=True)
     entries = []
@@ -30,7 +31,7 @@ def make_handoff(tmp_path: Path, *, scope: str = 'pilot-a', snapshot: str = 'sna
     data={
         'schema_version':'encyk-source-evidence-handoff/v2',
         'contract':'encyk.source-evidence-handoff/2.0.0',
-        'producer':{'system':'encyk','version':'0.12.0'},
+        'producer':{'system':'encyk','version':producer_version},
         'consumer':{'system':'koa-mediatheque','minimum_version':'0.2.0',
                     'source_catalog_profile':'koa.source-catalog/2.0.0'},
         'scope_key':scope,'snapshot_id':snapshot,'source_system':'wikidata',
@@ -200,3 +201,58 @@ def test_cli_plan_accept_replay_and_rejected_receipt(tmp_path, project_root):
                              text=True, capture_output=True)
     assert refused.returncode == 1
     assert json.loads(rejected_file.read_text())['status'] == 'rejected'
+
+
+def test_current_skope_encyk_014_handoff_and_idempotence(tmp_path, project_root):
+    """Skope 1.0 RC1 ships EncyK 0.14.0; no producer downgrade is allowed."""
+    imp = import_app_callable('services.encyk_handoff_service', 'import_encyk_handoff')
+    root, manifest, _ = make_handoff(tmp_path, producer_version='0.14.0')
+    with closing(init(tmp_path, project_root)) as db:
+        first = imp(db, manifest, root, tmp_path / '02_STORAGE')
+        second = imp(db, manifest, root, tmp_path / '02_STORAGE')
+        assert first['status'] == 'accepted'
+        assert second['status'] == 'already_accepted'
+        assert first['visibility'] == 'private'
+        assert not first['semantic_identity_assigned']
+
+
+def test_future_unapproved_producer_version_is_rejected(tmp_path):
+    plan = import_app_callable('services.encyk_handoff_service', 'plan_encyk_handoff')
+    root, manifest, _ = make_handoff(tmp_path, producer_version='0.15.0')
+    with pytest.raises(ValueError, match='Schema validation'):
+        plan(manifest, root)
+
+
+def test_cli_instance_root_targets_one_existing_library(tmp_path, project_root):
+    import subprocess
+    import sys
+    root, manifest, _ = make_handoff(tmp_path, producer_version='0.14.0')
+    instance = tmp_path / 'mediatheque-privee'
+    (instance / '01_DB').mkdir(parents=True)
+    (instance / '02_STORAGE').mkdir()
+    other = tmp_path / 'mediatheque-math'
+    (other / '01_DB').mkdir(parents=True)
+    (other / '02_STORAGE').mkdir()
+    initialize = import_app_callable('db', 'initialize_database')
+    assert initialize(instance / '01_DB' / 'koa_mediatheque.sqlite', project_root / 'schemas' / 'sqlite').success
+    assert initialize(other / '01_DB' / 'koa_mediatheque.sqlite', project_root / 'schemas' / 'sqlite').success
+    cmd = [sys.executable, str(project_root / '05_TOOLS' / 'ImportEncyKHandoff.py'),
+           '--handoff', str(manifest), '--evidence-root', str(root)]
+    planned = subprocess.run(cmd + ['--instance-root', str(instance)], text=True, capture_output=True)
+    assert planned.returncode == 0, planned.stderr
+    assert json.loads(planned.stdout)['status'] == 'plan_valid'
+    rejected = subprocess.run(cmd + ['--accept', '--instance-root', str(instance),
+                                     '--storage', str(other / '02_STORAGE')], text=True, capture_output=True)
+    assert rejected.returncode != 0
+    assert json.loads(rejected.stderr)['status'] == 'rejected'
+    accepted = subprocess.run(cmd + ['--accept', '--instance-root', str(instance)], text=True, capture_output=True)
+    assert accepted.returncode == 0, accepted.stderr
+    assert json.loads(accepted.stdout)['status'] == 'accepted'
+    import sqlite3
+    with closing(sqlite3.connect(other / '01_DB' / 'koa_mediatheque.sqlite')) as other_db:
+        assert other_db.execute('SELECT COUNT(*) FROM source_registry').fetchone()[0] == 0
+    assert list((instance / '02_STORAGE' / 'source_files').iterdir())
+    assert not (other / '02_STORAGE' / 'source_files').exists()
+    repeated = subprocess.run(cmd + ['--accept', '--instance-root', str(instance)], text=True, capture_output=True)
+    assert repeated.returncode == 0, repeated.stderr
+    assert json.loads(repeated.stdout)['status'] == 'already_accepted'

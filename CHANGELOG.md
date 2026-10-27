@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1 - 2026-10-27
+
+- Synchronize the **exact** EncyK source-evidence-handoff v2 schema from Skope unified EncyK 0.14.0 (17 pinned supported producer versions, including historical 0.12.0).
+- Add `--instance-root` to target one existing SQLite/filesystem Médiathèque instance, refusing mixed instance-root/DB/storage arguments; the legacy explicit paths remain available.
+- Validate current Skope producer version, unknown-version refusal, instance isolation and replay idempotence in new regression tests.
+- No publication authorization, canonical Kristal writes, actual Wikidata data import, data migration, or Moodle instance changes.
+
+
 ## 0.5.0 - 2026-10-03
 
 - Enrichit le bootstrap UCKK avec 58 références GitHub publiques dérivées de `Kristal-kOA-Ecosystem v0.6.3`, dont 12 avec commit explicitement épinglé.

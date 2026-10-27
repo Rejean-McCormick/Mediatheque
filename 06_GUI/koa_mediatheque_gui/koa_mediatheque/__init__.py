@@ -22,7 +22,7 @@ def _get_package_version() -> str:
     try:
         return _distribution_version(_DISTRIBUTION_NAME)
     except PackageNotFoundError:
-        return "0.5.0"
+        return "0.5.1"
 
 
 __version__ = _get_package_version()
