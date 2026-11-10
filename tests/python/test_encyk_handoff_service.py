@@ -256,3 +256,115 @@ def test_cli_instance_root_targets_one_existing_library(tmp_path, project_root):
     repeated = subprocess.run(cmd + ['--accept', '--instance-root', str(instance)], text=True, capture_output=True)
     assert repeated.returncode == 0, repeated.stderr
     assert json.loads(repeated.stdout)['status'] == 'already_accepted'
+
+
+def test_rejects_symlinked_source_storage_before_import(tmp_path, project_root):
+    """No source files may be copied via a redirected library source area."""
+    imp = import_app_callable('services.encyk_handoff_service', 'import_encyk_handoff')
+    root, manifest, _ = make_handoff(tmp_path)
+    storage = tmp_path / 'storage'
+    storage.mkdir()
+    unrelated = tmp_path / 'unrelated-library'
+    unrelated.mkdir()
+    try:
+        (storage / 'source_files').symlink_to(unrelated, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip('Symlink not available')
+    with closing(init(tmp_path, project_root)) as db:
+        with pytest.raises(ValueError, match='link/junction'):
+            imp(db, manifest, root, storage)
+        assert db.execute('SELECT COUNT(*) FROM source_registry').fetchone()[0] == 0
+        assert not list(unrelated.iterdir())
+
+
+def test_instance_cli_rejects_linked_db_or_storage(tmp_path, project_root):
+    """The explicit --instance-root must not accept another library by symlink."""
+    import subprocess
+    import sys
+    evidence, manifest, _ = make_handoff(tmp_path)
+    instance = tmp_path / 'selected-instance'
+    (instance / '01_DB').mkdir(parents=True)
+    other = tmp_path / 'unrelated-library'
+    (other / '01_DB').mkdir(parents=True)
+    (other / '02_STORAGE').mkdir()
+    (instance / '02_STORAGE').mkdir()
+    initialize = import_app_callable('db', 'initialize_database')
+    assert initialize(instance / '01_DB/koa_mediatheque.sqlite', project_root / 'schemas/sqlite').success
+    assert initialize(other / '01_DB/koa_mediatheque.sqlite', project_root / 'schemas/sqlite').success
+    cmd = [sys.executable, str(project_root / '05_TOOLS/ImportEncyKHandoff.py'),
+           '--handoff', str(manifest), '--evidence-root', str(evidence),
+           '--accept', '--instance-root', str(instance)]
+    (instance / '02_STORAGE').rmdir()
+    try:
+        (instance / '02_STORAGE').symlink_to(other / '02_STORAGE', target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip('Symlink not available')
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    assert proc.returncode != 0
+    assert 'link or junction' in proc.stderr
+    with closing(__import__('sqlite3').connect(other / '01_DB/koa_mediatheque.sqlite')) as db:
+        assert db.execute('SELECT COUNT(*) FROM source_registry').fetchone()[0] == 0
+
+
+def test_actual_skope_producer_can_import_and_replay(tmp_path, project_root):
+    """Opt-in bilateral test: instantiate the actual EncyK producer in Skope.
+
+    Run with KOA_SKOPE_REPO pointing to the paired Skope checkout. Unlike
+    make_handoff(), this executes the producer's pipeline and hashes real bytes.
+    """
+    import importlib.util
+    import os
+    import sys
+    source = os.environ.get('KOA_SKOPE_REPO')
+    if not source:
+        pytest.skip('Set KOA_SKOPE_REPO to run actual producer/consumer contract test')
+    skope = Path(source)
+    fixture = skope / 'encyk/00_system/tools/scope-builder/tests/test_scope_pipeline.py'
+    if not fixture.is_file():
+        pytest.fail('Paired Skope test fixture not found')
+    spec = importlib.util.spec_from_file_location('skope_scope_fixture_for_mediatheque', fixture)
+    fixture_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture_module)
+    producer = fixture_module.ScopePipelineTest()
+    producer.setUp()
+    try:
+        cfg = producer.root / '00_system/tools/scope-builder/config/scopes/test.scope.json'
+        for script, params in (
+            ('01_resolve_roots.py', ('--scope', cfg, '--backend', 'raw')),
+            ('02_discover_scope.py', ('--scope', cfg, '--backend', 'raw')),
+            ('03_freeze_scope.py', ('--scope', cfg)),
+            ('04_extract_evidence.py', ('--scope', cfg)),
+            ('06_prepare_identity_candidates.py', ('--scope', cfg)),
+            ('07_prepare_source_handoff.py', ('--scope', cfg)),
+        ):
+            producer.run_script(script, *params)
+        latest = json.loads((producer.root / '20_evidence/handoffs/mediatheque/test-scope/latest.json').read_text())
+        manifest = producer.root / latest['path']
+        prod_schema = skope / 'encyk/00_system/contracts/source-evidence-handoff/2.0.0/schema.json'
+        consumer_schema = project_root / '06_GUI/koa_mediatheque_gui/koa_mediatheque/contracts/encyk_source_handoff_2/schema.json'
+        assert prod_schema.read_bytes() == consumer_schema.read_bytes()
+        imp = import_app_callable('services.encyk_handoff_service', 'import_encyk_handoff')
+        with closing(init(tmp_path, project_root)) as db:
+            accepted = imp(db, manifest, producer.root, tmp_path / '02_STORAGE')
+            again = imp(db, manifest, producer.root, tmp_path / '02_STORAGE')
+            assert accepted['status'] == 'accepted'
+            assert again['status'] == 'already_accepted'
+            assert accepted['semantic_identity_assigned'] is False
+            assert all(r['locator'].startswith('koa-media://version/') for r in accepted['representations'])
+            receipt_path = tmp_path / 'receipt.json'
+            receipt_path.write_text(json.dumps(accepted), encoding='utf-8')
+            verifier = skope / 'encyk/00_system/tools/scope-builder/scripts/verify_mediatheque_receipt.py'
+            result = __import__('subprocess').run(
+                [sys.executable, str(verifier), '--handoff', str(manifest), '--receipt', str(receipt_path)],
+                text=True, capture_output=True)
+            assert result.returncode == 0, result.stderr
+            response = json.loads(result.stdout)
+            assert response['status'] == 'correlated_unsigned_receipt'
+            assert response['receiver_receipt_authenticated'] is False
+            # Alter source evidence: new admissions and replays must fail closed.
+            item = json.loads(manifest.read_text())['files'][0]
+            (producer.root / item['path']).write_bytes(b'corrupted-after-export')
+            with pytest.raises(ValueError, match='content mismatch'):
+                imp(db, manifest, producer.root, tmp_path / '02_STORAGE')
+    finally:
+        producer.tearDown()

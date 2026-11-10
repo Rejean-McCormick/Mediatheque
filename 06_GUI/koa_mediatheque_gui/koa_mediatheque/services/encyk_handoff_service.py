@@ -74,6 +74,29 @@ def _safe_file(root: Path, raw: str):
     return candidate
 
 
+def _verified_storage_root(storage_root: str | Path) -> Path:
+    """Reject an indirect source-files store before any source DB mutation.
+
+    A symlink or Windows junction at the selected storage root or its canonical
+    ``source_files`` area could redirect private evidence into another library.
+    Existing ordinary directories and not-yet-created local stores are allowed.
+    """
+    base = Path(storage_root).expanduser().absolute()
+    area = base / SOURCE_FILES_FILEAREA
+    for candidate in (base, area):
+        if candidate.is_symlink() or bool(getattr(candidate, "is_junction", lambda: False)()):
+            raise EncyKHandoffError("Storage root or source area is a link/junction")
+    resolved_base = base.resolve()
+    resolved_area = area.resolve()
+    if not resolved_area.is_relative_to(resolved_base):
+        raise EncyKHandoffError("Source storage area escapes the selected root")
+    if base.exists() and not base.is_dir():
+        raise EncyKHandoffError("Selected storage root is not a directory")
+    if area.exists() and not area.is_dir():
+        raise EncyKHandoffError("Source storage area is not a directory")
+    return resolved_area
+
+
 def plan_encyk_handoff(manifest_path: str | Path, evidence_root: str | Path) -> dict:
     """Validate the exact producer schema, identity, paths, sizes and hashes; no writes."""
     manifest = Path(manifest_path).expanduser().resolve()
@@ -157,6 +180,9 @@ def import_encyk_handoff(connection: sqlite3.Connection, manifest_path: str | Pa
     files, which are non-public and safe to clean up manually after inspection.
     """
     plan = plan_encyk_handoff(manifest_path, evidence_root)
+    # This check must precede DB/schema writes, and the target is reused for
+    # all copied files rather than recalculated after admission.
+    target_root = _verified_storage_root(storage_root)
     ensure_source_catalog_schema(connection)
     _ensure_receipts(connection)
     replay = _existing_receipt(connection, plan)
@@ -176,7 +202,6 @@ def import_encyk_handoff(connection: sqlite3.Connection, manifest_path: str | Pa
     if existing:
         raise EncyKHandoffError("Snapshot already exists without matching acceptance receipt")
     import_id = payload["handoff_id"]
-    target_root = Path(storage_root).expanduser().resolve() / SOURCE_FILES_FILEAREA
     copied = []
     receipt_reps = []
     try:

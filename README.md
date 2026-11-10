@@ -45,6 +45,18 @@ Public GitHub repositories may be cataloged as `external_reference` media. A Git
 **Separation rule:** the engine owns its implementation; instances own their data; Kristal retains semantic identity and commitments.
 
 
+## Branch 01 safety and owner-to-owner verification
+
+The local EncyK v2 importer now refuses redirected/junction-backed instance database and storage paths and symlinked `source_files` areas before admitting source data. The receiver receipt `koa.encyk-source-handoff-receipt/1.0.0` is **consumer-scoped and unsigned**; a new Skope tool can correlate it with the exact producer handoff, but this does not authenticate the receiver or verify stored bytes without inspecting the selected Médiathèque instance.
+
+With **both source trees available**, run the bilateral producer/consumer fixture:
+
+```bash
+KOA_SKOPE_REPO=/path/to/Skope PYTHONPATH=06_GUI/koa_mediatheque_gui:. python -m pytest -q tests/python/test_encyk_handoff_service.py -k actual_skope_producer
+```
+
+This generates a disposable small Wikidata fixture, invokes the **real** EncyK preparation scripts, imports to a test-only library, verifies replay, correlates the receipt and checks corruption refusal. It does not touch any real `D:` corpus or qualify Windows deployment.
+
 ## EncyK / Skope current handoffs (0.5.1)
 
 The shared engine accepts `encyk.source-evidence-handoff/2.0.0` from Skope's EncyK

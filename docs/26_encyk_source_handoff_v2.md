@@ -1,10 +1,10 @@
-# EncyKlopedia 0.12 → Médiathèque kOA 0.5 — handoff d'évidence v2
+# Skope / integrated EncyK → Médiathèque kOA — source evidence handoff v2
 
-**Statut : adaptateur local candidat, non déployé**. Source de schéma immuable : `00_system/contracts/source-evidence-handoff/2.0.0/schema.json` du snapshot EncyK. Une copie **inchangée** est incluse dans `koa_mediatheque/contracts/encyk_source_handoff_2/schema.json` pour valider les imports hors-ligne.
+**Status: local-only candidate adapter, not a deployed service.** The target acquisition owner is **Skope with its integrated EncyK engine**; older descriptions of EncyKlopedia as an acquisition system remain historical compatibility references only. The modern EncyKlopedia is a distinct read product. Source de schéma immuable : `00_system/contracts/source-evidence-handoff/2.0.0/schema.json` du snapshot EncyK. Une copie **inchangée** est incluse dans `koa_mediatheque/contracts/encyk_source_handoff_2/schema.json` pour valider les imports hors-ligne.
 
 ## Responsabilités
 
-- **EncyKlopedia** choisit scope, acquiert, extrait et prépare un handoff immuable `encyk.source-evidence-handoff/2.0.0`.
+- **Skope / integrated EncyK** choisit scope, acquiert, extrait et prépare un handoff immuable `encyk.source-evidence-handoff/2.0.0`.
 - **Médiathèque** attribue les UUID persistants, vérifie les octets, garde Source, Snapshot, Representation, library row et locator `koa-media://version/...`.
 - **Kristal/Kristall** garde exclusivement les identités et engagements sémantiques. Cet import **ne crée pas de Referent Registry, KQ, KP, KA, KS ou Mesh**.
 - `encyklopedia.corpus-harvest-handoff/1.0.0` (carte kOA documentaire historique) **n'est pas accepté** et n'est pas supposé convertible sans adaptateur qualifié.
@@ -50,6 +50,12 @@ Option `--receipt-out chemin.json` : export local facultatif du résultat, **y c
 - Le précontrôle et la copie ne constituent pas une transaction unique au niveau du système de fichiers : après crash du processus, des fichiers orphelins non publics peuvent exister, à examiner avant nettoyage. Un échec Python intercepté annule la transaction DB et nettoie les nouveaux fichiers copiés.
 - Aucun réseau, aucun changement GitHub, aucune opération de publication et aucune identité Kristal.
 - Le format de reçu Médiathèque `koa.encyk-source-handoff-receipt/1.0.0` est une **extension proposée côté consommateur**, non une version de contrat déjà acceptée par EncyK. Il reste à faire accepter le reçu par le producteur et à tester le cycle réel de confirmation.
+
+## Branch 01 — actual source-to-consumer validation (2026-11-09)
+
+The paired Skope + Médiathèque checkout can run an **actual producer/receiver** fixture with `KOA_SKOPE_REPO` set to the Skope code root (see `README.md`). This validates the exact schema bytes, producer-generated evidence, acceptance, replay, Skope-side unsigned receipt correlation and tampered-source rejection; it does **not** qualify real D: data or a deployed trust channel.
+
+The receiver also fails closed before database changes when `source_files` storage is redirected through a symlink/junction, or `--instance-root` database/storage resolves through such a link. The local unsigned receipt is not an authentication credential. Médiathèque remains the durable source authority and does not create KQ/KP/KA/KS.
 
 ## 2026-10-27 — EncyK 0.14.0
 

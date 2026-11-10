@@ -21,6 +21,31 @@ from koa_mediatheque.services.encyk_handoff_service import (  # noqa: E402
 )
 
 
+def _validate_local_instance_root(value: Path) -> tuple[Path, Path]:
+    """Fail closed for data-path indirection in an explicitly selected instance.
+
+    The engine is shared but instance data cannot be redirected with filesystem
+    links/junctions into another library. Does not create or initialize data.
+    """
+    raw_root = value.expanduser().absolute()
+    if not raw_root.is_dir() or raw_root.is_symlink() or bool(getattr(raw_root, "is_junction", lambda: False)()):
+        raise ValueError("--instance-root must be an existing plain local directory")
+    root = raw_root.resolve()
+    for relative in ("01_DB", "01_DB/koa_mediatheque.sqlite", "02_STORAGE", "02_STORAGE/source_files"):
+        current = root
+        for part in Path(relative).parts:
+            current = current / part
+            if current.is_symlink() or bool(getattr(current, "is_junction", lambda: False)()):
+                raise ValueError("Instance database/storage path contains a link or junction")
+        if not current.resolve().is_relative_to(root):
+            raise ValueError("Instance database/storage path escapes selected instance")
+    db = root / "01_DB" / "koa_mediatheque.sqlite"
+    storage = root / "02_STORAGE"
+    if not db.is_file() or not storage.is_dir():
+        raise ValueError("--instance-root requires initialized DB and existing 02_STORAGE directory")
+    return db, storage
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Plan/accept EncyK v2 evidence into Médiathèque source catalog")
     p.add_argument("--handoff", required=True, type=Path, help="Path to producer handoff JSON")
@@ -52,13 +77,7 @@ def main() -> int:
             if a.instance_root:
                 if a.db or a.storage:
                     raise ValueError("--instance-root cannot be combined with --db or --storage")
-                instance_root = a.instance_root.expanduser().resolve()
-                if not instance_root.is_dir():
-                    raise ValueError("--instance-root must be an existing instance directory")
-                db_path = instance_root / "01_DB" / "koa_mediatheque.sqlite"
-                storage_path = instance_root / "02_STORAGE"
-                if not storage_path.is_dir():
-                    raise ValueError("--instance-root must contain an existing 02_STORAGE directory")
+                db_path, storage_path = _validate_local_instance_root(a.instance_root)
             else:
                 db_path, storage_path = a.db, a.storage
             if not db_path or not storage_path or not db_path.is_file():
