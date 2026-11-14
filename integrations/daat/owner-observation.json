@@ -1,0 +1,20 @@
+{
+  "schema": "koa.daat-owner-observation/0.1.0-local",
+  "subject": "DaAT 0.4.3 local review-handoff (not an owner-adopted profile)",
+  "repository": "mediatheque",
+  "role": "mediatheque",
+  "authority": "source bytes and custody in selected instance",
+  "evidence_status": "OBSERVED_SNAPSHOT",
+  "markers": [
+    "README.md",
+    "pyproject.toml",
+    "contracts/kristal-ik-1.1/export-manifest.schema.json"
+  ],
+  "read_only": true,
+  "prototype_consumer_adopted": false,
+  "ik_ingress_approved": false,
+  "canonical_write_authorized": false,
+  "publication_authorized": false,
+  "boundary": "Skope/EncyK and Médiathèque custody receipts are not DaAT source-byte permission or semantic confirmation. Engine source is not an instance data store.",
+  "acceptance_gate": "Instance authority and rights holder approve exact source byte intake; receiving custody adapter/receipt qualified against real instance."
+}
